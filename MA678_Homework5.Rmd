@@ -1,0 +1,361 @@
+---
+title: "MA678 homework 05"
+subtitle: "Multinomial Regression"
+author: "Sky Liu"
+date: "Oct. 27, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,out.width="0.9\\linewidth",dev="pdf",fig.align  = 'center')
+pacman::p_load(
+  "ggplot2",
+  "knitr",
+  "arm",
+  "data.table",
+  "foreign",
+  "car",
+  "faraway",
+  "nnet",
+  "reshape2",
+  "VGAM",
+  "dplyr",
+  "nnet")
+```
+
+## Multinomial logit: 
+Using the individual-level survey data from the 2000 National Election Study (data in folder nes), predict party identification (which is on a 7-point scale) using ideology and demographics with an ordered multinomial logit model.
+```{r, echo=FALSE}
+nes5200<-read.dta("http://www.stat.columbia.edu/~gelman/arm/examples/nes/nes5200_processed_voters_realideo.dta")
+#saveRDS(nes5200,"nes5200.rds")
+#nes5200<-readRDS("nes5200.rds")
+# logistic regression of vote preference on income
+nes5200_dt <- data.table(nes5200)
+yr <- 2000
+nes5200_dt_s<-nes5200_dt[ year==yr,]
+nes5200_dt_s$income <- droplevels(nes5200_dt_s$income)
+nes5200_dt_s$partyid7 <- droplevels(nes5200_dt_s$partyid7)
+
+nes5200_dt_s$gender <- factor(nes5200_dt_s$gender, labels=c("male", "female"))
+nes5200_dt_s$race <- factor(nes5200_dt_s$race, labels=c("white", "black", "asian", 
+                                    "native american", "hispanic"))
+nes5200_dt_s$south <- factor(nes5200_dt_s$south)
+nes5200_dt_s$ideo <- factor(nes5200_dt_s$ideo, labels=c("liberal", "moderate", "conservative"))
+
+nes_data_comp<-nes5200_dt_s[complete.cases(nes5200_dt_s[,list(partyid7,income,ideo,female,white)])]
+nes_data_comp$ideology <- scale(nes_data_comp$ideo_feel,center=TRUE)
+```
+1. Summarize the parameter estimates numerically and also graphically. 
+
+```{r}
+lm1<- polr(partyid7~factor(ideo)+factor(gender),data=nes_data_comp)
+summary(lm1)
+predx<- expand.grid(ideo = c("moderate","conservative"),gender=c("female","male"))
+predy<-predict(lm1,newdata=predx,type = "p")
+ggplot(melt(cbind(predx,predy),id.vars = c("gender","ideo")))+
+  geom_bar(stat="identity")+aes(x=ideo,y=value, fill=variable)+
+  facet_grid(~gender)
+```
+
+2. Explain the results from the fitted model.
+
+From the coefficient we can see that gender has no statistical significant impact on party id. 
+
+log odds of not strong democrat = $log(\frac{\pi2+\pi3+\pi4+\pi5+\pi6+\pi7}{\pi1})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c12$
+
+= 0.5176 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+log odds of not strong democrat nor weak democrat = $log(\frac{\pi3+\pi4+\pi5+\pi6+\pi7}{\pi1+\pi2})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c23$
+
+= -0.2747 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+log odds of not strong democrat, weak democrat nor independent-democrat = $log(\frac{\pi4+\pi5+\pi6+\pi7}{\pi1+\pi2+\pi3})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c34$
+
+= -1.0234 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+log odds of not strong democrat, weak democrat, independent-democrat nor independent-independent = $log(\frac{\pi5+\pi6+\pi7}{\pi1+\pi2+\pi3+\pi4})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c45$
+
+= -1.3914 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+log odds of weak republican or strong republican = $log(\frac{\pi6+\pi7}{\pi1+\pi2+\pi3+\pi4+\pi5})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c56$
+
+= -2.1535 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+log odds of strong republican = $log(\frac{\pi7}{\pi1+\pi2+\pi3+\pi4+\pi5\pi6+})$
+
+$= \beta_1 moderate+\beta_2 conservative + \beta_3 female-c67$
+
+= -3.0906 + 0.7859 * moderate+ 1.9100 * conservative - 0.3703 * female
+
+
+
+3. Use a binned residual plot to assess the fit of the model.
+```{r}
+
+nesdata <- cbind(partyid=nes_data_comp$partyid7, female=nes_data_comp$female, ideo=nes_data_comp$ideo)
+nesdata <- data.frame(na.omit(nesdata))
+resid <- model.matrix(~factor(partyid)-1, data=nesdata)-fitted(lm1)
+par(mfrow=c(3,2))
+for(i in 1:6){
+  binnedplot(fitted(lm1)[,i], resid[,i])
+}
+binnedplot(fitted(lm1)[,7], resid[,7])
+```
+
+
+
+
+
+# High School and Beyond 
+The hsb data was collected as a subset of the High School and Beyond study conducted by the National Education Longitudinal Studies program of the National Center for Education Statistics. The variables are gender; race; socioeconomic status; school type; chosen high school program type; scores on reading, writing, math, science, and social studies. We want to determine which factors are related to the choice of the type of program???academic, vocational, or general???that the students pursue in high school. The response is multinomial with three levels.
+
+```{r}
+data(hsb)
+?hsb
+```
+
+1. Fit a trinomial response model with the other relevant variables as predictors (untransformed).
+```{r}
+
+lm2 <- multinom(prog~read+write+math+science+race,data = hsb,trace=FALSE,HESS=TRUE) 
+summary(lm2)
+```
+
+2. For the student with id 99, compute the predicted probabilities of the three possible choices.
+
+```{r}
+predict(lm2,newdata=hsb[hsb$id==99,],type="p")
+```
+
+
+# Happiness
+Data were collected from 39 students in a University of Chicago MBA class and may be found in the dataset `happy`.
+```{r}
+library(faraway)
+data(happy)
+?happy
+```
+
+1. Build a model for the level of happiness as a function of the other variables.
+```{r}
+lm3 <-polr(factor(happy)~money+factor(sex)+factor(love)+factor(work),data=happy) 
+summary(lm3)
+```
+
+2. Interpret the parameters of your chosen model.
+$log\frac{\pi3+...+\pi10}{\pi1+\pi2} = 0.84 + 0.0178 ??? money ??? 1.025 ??? sex_1 + 3.46???love_2 +7.85???love_3 ???1.19???work_2 +0.02???work_3 +1.85???work_4 +0.65???work_5$
+Log odds of lonely people who are unsatisfactory with sex, with 0 family income, 
+ that has happy index from 3 to 10 over the ones with happy index = 2, is 0.84
+
+3. Predict the happiness distribution for subject whose parents earn $30,000 a year,
+who is lonely, not sexually active and has no job.
+```{r}
+kable(
+predict(lm3,newdata=data.frame(love=1,sex=0,work=1,money=30),type="probs"))
+```
+
+# newspaper survey on Vietnam War
+A student newspaper conducted a survey of student opinions about the Vietnam War in May 1967. Responses were classified by sex, year in the program and one of four opinions. The survey was voluntary. The data may be found in the dataset `uncviet`.  Treat the opinion as the response and the sex and year as predictors. Build a proportional odds model, giving an interpretation to the estimates.
+
+```{r}
+data(uncviet)
+?uncviet
+lm4 <- polr(policy~sex+year,data=uncviet,weights = y,Hess = TRUE) 
+summary(lm4)
+```
+
+The probability of policy is not A is $exp(1.11???0.65???sexmale+1.18???yearGrad+0.40???yearJunior+0.54???yearSenior+ 0.13 ??? yearSoph)$
+
+A male has opinions B,C or D is 48% (1- exp(-0.65)) lower than a female, holding other variable constant.
+
+A grad student has opinions B,C or D is 224% (exp(1.177)-1) higher than a freshman, holding other variable constant.
+
+A junior student has opinions B,C or D is 49% (exp(0.396)-1) higher than a freshman, holding other variable constant.
+
+A senior student has opinions B,C or D is 72% (exp(0.5444)-1) higher than a freshman, holding other variable constant.
+
+A sophemore student has opinions B,C or D is 14% (exp(1.1315)-1) higher than a freshman, holding other variable constant.
+
+
+# pneumonoconiosis of coal miners
+The pneumo data gives the number of coal miners classified by radiological examination into one of three categories of pneumonoconiosis and by the number of years spent working at the coal face divided into eight categories.
+
+```{r}
+library(faraway)
+data(pneumo,package="faraway")
+head(pneumo)
+?pneumo
+```
+
+1. Treating the pneumonoconiosis status as response variable as nominal, build a model for predicting the frequency of the three outcomes in terms of length of service and use it to predict the outcome for a miner with 25 years of service.
+
+```{r}
+lm6_nominal<-multinom(status~year,weights=Freq,data=pneumo)
+summary(lm6_nominal)
+pred1<-predict(lm6_nominal,newdata=data.frame(year=25),type = "probs")
+```
+
+2. Repeat the analysis with the pneumonoconiosis status being treated as ordinal. 
+
+```{r}
+lm6_ornidal<-polr(status~year,weights=Freq,data=pneumo) 
+summary(lm6_ornidal)
+pred2<-predict(lm6_ornidal,newdata=data.frame(year=25),type = "probs")
+```
+
+3.Now treat the response variable as hierarchical with top level indicating whether
+the miner has the disease and the second level indicating, given they have the
+disease, whether they have a moderate or severe case. 
+
+```{r}
+n_pneumo <- pneumo
+n_pneumo$status <- as.character(n_pneumo$status)
+n_pneumo$status[9:24] <- "abnormal"
+n_pneumo$status <- as.factor(n_pneumo$status)
+abn_pneumo <- pneumo[-1:-8, ]
+lm6_normal <- glm( status ~ year, data = n_pneumo, family = binomial(link = "logit"), weights = Freq)
+lm6_abnormal <- glm( status ~ year, data = abn_pneumo, family = binomial(link = "logit"), weights = Freq)
+
+normal<-predict (lm6_normal, newdata=data.frame(year=25), type = "response")
+severe<-predict (lm6_abnormal, newdata=data.frame(year=25), type = "response") *(1-predict (lm6_normal, newdata=data.frame(year=25), type = "response"))
+mild <- (1-predict (lm6_abnormal, newdata=data.frame(year=25), type = "response")) *(1-predict (lm6_normal, newdata=data.frame(year=25), type = "response"))
+pred3<-c(mild, normal, severe)
+```
+
+4.  Compare the three analyses.
+
+```{r}
+kable(rbind(pred1,pred2,pred3))
+
+
+new_pneumo<-dcast(pneumo, year ~ status, value.var = "Freq") 
+new_pneumo<-new_pneumo %>%mutate(total=apply(new_pneumo[,2:4],1,sum))
+new_pneumo[,2:4]<-round(new_pneumo[,2:4]/new_pneumo[,"total"],2) 
+
+pred11<-predict(lm6_nominal,newdata=new_pneumo,type="p")
+resid1<-new_pneumo[,2:4]-pred11
+par(mfrow=c(1,3))
+for(i in 1:3){
+  binnedplot(pred11[,i],resid1[,i])
+  }
+
+pred22<-predict(lm6_ornidal,newdata=new_pneumo,type="p")
+resid2<-new_pneumo[,2:4]-pred22
+par(mfrow=c(1,3));for(i in 1:3){binnedplot(pred22[,i],resid2[,i])}
+
+
+
+
+```
+
+From the binnedplot we can see that the second model does not fit well. 
+
+From the probability prediction table we can see that the first and the second model are similar.
+
+
+
+# (optional) Multinomial choice models: 
+
+Pardoe and Simonton (2006) fit a discrete choice model to predict winners of the Academy Awards. Their data are in the folder academy.awards.
+
+name  | description
+------|----------------------------------------
+No    | unique nominee identifier
+Year  | movie release year (not ceremony year)
+Comp  | identifier for year/category
+Name  | short nominee name
+PP    | best picture indicator
+DD    | best director indicator
+MM    | lead actor indicator
+FF    | lead actress indicator
+Ch    | 1 if win, 2 if lose
+Movie | short movie name
+Nom   | total oscar nominations
+Pic   | picture nom
+Dir   | director nom
+Aml   | actor male lead nom
+Afl   | actor female lead nom
+Ams   | actor male supporting nom
+Afs   | actor female supporting nom
+Scr   | screenplay nom
+Cin   | cinematography nom
+Art   | art direction nom
+Cos   | costume nom
+Sco   | score nom
+Son   | song nom
+Edi   | editing nom
+Sou   | sound mixing nom
+For   | foreign nom
+Anf   | animated feature nom
+Eff   | sound editing/visual effects nom
+Mak   | makeup nom
+Dan   | dance nom
+AD    | assistant director nom
+PrNl  | previous lead actor nominations
+PrWl  | previous lead actor wins
+PrNs  | previous supporting actor nominations
+PrWs  | previous supporting actor wins
+PrN   | total previous actor/director nominations
+PrW   | total previous actor/director wins
+Gdr   | golden globe drama win
+Gmc   | golden globe musical/comedy win
+Gd    | golden globe director win
+Gm1   | golden globe male lead actor drama win
+Gm2   | golden globe male lead actor musical/comedy win
+Gf1   | golden globe female lead actor drama win
+Gf2   | golden globe female lead actor musical/comedy win
+PGA   | producer's guild of america win
+DGA   | director's guild of america win
+SAM   | screen actor's guild male win
+SAF   | screen actor's guild female win
+PN    | PP*Nom
+PD    | PP*Dir
+DN    | DD*Nom
+DP    | DD*Pic
+DPrN  | DD*PrN
+DPrW  | DD*PrW
+MN    | MM*Nom
+MP    | MM*Pic
+MPrN  | MM*PrNl
+MPrW  | MM*PrWl
+FN    | FF*Nom
+FP    | FF*Pic
+FPrN  | FF*PrNl
+FPrW  | FF*PrWl
+
+```{r, echo=FALSE}
+# coefficient for black in 1964 to illustrate nonidentifiability of logistic regression for chap 5 hwk
+oscar<-read.csv("http://www.stat.columbia.edu/~gelman/arm/examples/academy.awards/oscars.csv",header=TRUE)
+#saveRDS(oscar,"oscar.rds")
+#oscar<-readRDS("oscar.rds")
+```
+
+1. Fit your own model to these data.
+
+```{r}
+
+```
+
+2. Display the fitted model on a plot that also shows the data.
+
+```{r}
+
+```
+
+3. Make a plot displaying the uncertainty in inferences from the fitted model.
+
+```{r}
+
+```
